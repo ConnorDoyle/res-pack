@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: res-pack
+  namespace: kube-system
+data:
+ policy.cfg : |
+  {
+  "kind" : "Policy",
+  "apiVersion" : "v1",
+  "predicates" : [
+  	{"name" : "PodFitsHostPorts"},
+  	{"name" : "PodFitsResources"},
+  	{"name" : "NoDiskConflict"},
+  	{"name" : "MatchNodeSelector"},
+  	{"name" : "HostName"}
+  ],
+  "priorities" : [
+  	{"name" : "LeastRequestedPriority", "weight" : 1},
+  	{"name" : "BalancedResourceAllocation", "weight" : 1},
+  	{"name" : "ServiceSpreadingPriority", "weight" : 1},
+  	{"name" : "EqualPriority", "weight" : 1}
+  ],
+  "extenders" : [
+  	{
+          "urlPrefix": "http://localhost/scheduler",
+          "apiVersion": "v1beta1",
+          "filterVerb": "",
+          "bindVerb": "",
+          "prioritizeVerb": "priorities/res-pack",
+          "weight": 1,
+          "enableHttps": false,
+          "nodeCacheCapable": false
+  	}
+  ],
+  "hardPodAffinitySymmetricWeight" : 10
+  }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: res-pack
+  namespace: kube-system
+  labels:
+    app: res-pack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: res-pack
+  template:
+    metadata:
+      labels:
+        app: res-pack
+    spec:
+      containers:
+      - name: res-pack-ctr
+        image: gcr.io/google_containers/hyperkube:v1.9.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        - |
+          /hyperkube kube-scheduler \
+            --address 0.0.0.0 \
+            --scheduler-name res-pack \
+            --policy-configmap-namespace kube-system \
+            --policy-configmap res-pack \
+            --lock-object-namespace kube-system \
+            --lock-object-name res-pack \
+            -v=4
+      - name: res-pack-extender-ctr
+        image: a/b:c
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /version
+            port: 80
+        readinessProbe:
+          httpGet:
+            path: /version
+            port: 80
+        ports:
+          - containerPort: 80

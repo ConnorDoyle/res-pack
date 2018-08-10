@@ -1,0 +1,102 @@
+# Set up the scheduler policy.
+#
+# Either configure the scheduler to look at the below config:
+#
+#   --policy-configmap-namespace kube-system
+#   --policy-configmap res-pack
+#
+# Or, patch the existing config to add the scheduler extender info
+# as shown below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: res-pack
+  namespace: kube-system
+data:
+ policy.cfg : |
+  {
+  "kind" : "Policy",
+  "apiVersion" : "v1",
+  "predicates" : [
+  	{"name" : "PodFitsHostPorts"},
+  	{"name" : "PodFitsResources"},
+  	{"name" : "NoDiskConflict"},
+  	{"name" : "MatchNodeSelector"},
+  	{"name" : "PodToleratesNodeTaints"},
+  	{"name" : "HostName"}
+  ],
+  "priorities" : [
+  	{"name" : "LeastRequestedPriority", "weight" : 1},
+  	{"name" : "BalancedResourceAllocation", "weight" : 1},
+  	{"name" : "ServiceSpreadingPriority", "weight" : 1},
+  	{"name" : "EqualPriority", "weight" : 1}
+  ],
+  "extenders" : [
+  	{
+      "urlPrefix": "http://10.254.0.55/scheduler",
+      "apiVersion": "v1beta1",
+      "prioritizeVerb": "prioritize/res-pack",
+      "weight": 5,
+      "enableHttps": false,
+      "nodeCacheCapable": false
+  	}
+  ],
+  "hardPodAffinitySymmetricWeight" : 10
+  }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: res-pack
+  namespace: kube-system
+  labels:
+    k8s-app: res-pack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: res-pack
+  template:
+    metadata:
+      labels:
+        k8s-app: res-pack
+    spec:
+      containers:
+      - name: res-pack-extender-ctr
+        image: res-pack:latest
+        imagePullPolicy: Never
+        env:
+          - name: LOG_LEVEL
+            value: "DEBUG"
+        livenessProbe:
+          httpGet:
+            path: /version
+            port: 80
+        readinessProbe:
+          httpGet:
+            path: /version
+            port: 80
+        ports:
+          - containerPort: 80
+---
+# Service to reach the res-pack deployment
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: res-pack
+  name: res-pack
+  namespace: kube-system
+spec:
+  clusterIP: 10.254.0.55
+  ports:
+  - name: res-pack
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    k8s-app: res-pack
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
